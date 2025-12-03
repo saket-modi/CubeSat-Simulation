@@ -58,15 +58,23 @@ class MissionManager:
                 self.status = MissionStatus.OUT_OF_ORBIT_AND_MONITORING
             self.satellite.fixOrbit(self.keplerOrbit)
 
-
 ######## RIGID BODY IMPLEMENTATION ########
-class Dynamics:
-    def __init__(self, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0)):
+gEntities = []
+
+class Entity:
+    def __init__(self, mass, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0)):
+        self.mass = mass
+        gEntities.append(self)
         self.pos = pos
         self.vel = vel
         self.acc = acc
 
-    def updatePosition(self, radius, theta, phi):
+    # initialize destructor to remove object from entities global array
+    def __del__(self):
+        gEntities.remove(self)
+
+    # DYNAMICS
+    def updateDynamics(self, radius, phi, theta, v, f):
         x = radius * math.cos(phi) * math.cos(theta)
         y = radius * math.cos(phi) * math.sin(theta)
         z = radius * math.sin(phi)
@@ -76,58 +84,29 @@ class Dynamics:
         if hasattr(self, "orbit"):
             self.orbit.append((x, y, z, self.orbitColor))
 
-    def updateVelocity(self, speed, theta, phi):
-        vx = speed * math.cos(phi) * math.cos(theta)
-        vy = speed * math.cos(phi) * math.sin(theta)
-        vz = speed * math.sin(phi)
-        self.vel = (vx, vy, vz)
+        self.vel = v
+        self.forces = f
+        self.acc = (f[0] // self.mass, f[1] // self.mass, f[2] // self.mass)
 
-    def updateAcceleration(self, rate, theta, phi):
-        ax = rate * math.cos(phi) * math.cos(theta)
-        ay = rate * math.cos(phi) * math.sin(theta)
-        az = rate * math.sin(phi)
-        self.acc = (ax, ay, az)
-
-
-class Entity:
-    def __init__(self, mass, type, sprite=None):
-        self.mass = mass
-        self.type = type
-        self.sprite = sprite
-
-
-class Satellite(Entity, Dynamics):
-    def __init__(self, mass, type, sprite, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0)):
-        Entity.__init__(self, mass, type, sprite)
-        Dynamics.__init__(self, pos, vel, acc)
-        self.monitoring = False
-        self.orbit = []
-        self.orbitColor = (255, 255, 255)  # white
-
-    # --------------------------------------------------
-    # ORBIT LOGIC
-    # --------------------------------------------------
-    def checkOrbitClosure(self, threshold=3.0):
-        x, y, z = self.pos
-        for px, py, pz, _ in self.orbit[:-30]: # _ is the color
-            dx = x - px
-            dy = y - py
-            dz = z - pz
-            if dx * dx + dy * dy + dz * dz < threshold * threshold:
-                return True
-        return False
-
-    def updateDynamics(self, radius, speed, rate, theta, phi):
-        self.updatePosition(radius, theta, phi)
-        self.updateVelocity(speed, theta, phi)
-        self.updateAcceleration(rate, theta, phi)
-
-        if self.checkOrbitClosure():
+        if self.checkOrbitClosure(theta):
             self.orbitColor = (
                 random.randint(50, 255),
                 random.randint(50, 255),
                 random.randint(50, 255)
             )
+
+class Satellite(Entity):
+    def __init__(self, mass, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0)):
+        Entity.__init__(self, mass, pos, vel, acc)
+        self.monitoring = False
+        self.orbit = []
+        self.orbitColor = (255, 255, 255)  # white by default
+
+    # --------------------------------------------------
+    # ***********TBD*********** ORBIT LOGIC
+    # --------------------------------------------------
+    def checkOrbitClosure(self, angle):
+        return angle >= (2 * math.pi)
 
     # --------------------------------------------------
     # DRAW
@@ -193,7 +172,7 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Satellite Demo (with Orbit Trail)")
 
 # Create satellite and manager
-sat = Satellite(mass=1.0, type="CubeSat", sprite=None)
+sat = Satellite(mass=1.0)
 manager = MissionManager(
     status=MissionStatus.IN_ORBIT_AND_MONITORING,
     satellite=sat
@@ -222,7 +201,7 @@ while running:
     theta += angular_speed * dt
     r += 5.0 * math.sin(0.2 * t) * dt  # small drift
 
-    sat.updateDynamics(radius=r, speed=0, rate=0, theta=theta, phi=phi)
+    sat.updateDynamics(radius=r, phi=phi, theta=theta, v=(0,0,0), f=(0,0,0))
     manager.updateStatus()
 
     screen.fill((0, 0, 10))
