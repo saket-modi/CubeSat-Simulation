@@ -13,7 +13,7 @@ class Vector:
     
     @staticmethod
     def vectorScalar(v, k): # v = kv
-        return (v[0] / k, v[1] / k, v[2] / k)
+        return (v[0] * k, v[1] * k, v[2] * k)
 
     @staticmethod
     def vectorDot(v1, v2): # v1 . v2
@@ -50,14 +50,3 @@ class Vector:
         if mag == 0:
             return (0, 0, 0)
         return (v[0] / mag, v[1] / mag, v[2] / mag)
-    
-    @staticmethod
-    def vectorResolve(v):
-        # v = vx + vy + vz
-        mag = Vector.vectorMag(v)
-        if mag == 0:
-            return (0, 0, 0)
-        
-        # angles with x, y and z axes respectively
-        alpha, beta, gamma = Vector.vectorAngle(v, (1, 0, 0)), Vector.vectorAngle(v, (0, 1, 0)), Vector.vectorAngle(v, (0, 0, 1))
-        return (mag * math.cos(alpha), mag * math.cos(beta), mag * math.cos(gamma))

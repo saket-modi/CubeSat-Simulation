@@ -9,13 +9,18 @@ from enum import Enum
 
 ######## GLOBAL CONSTANTS ########
 
-# PHYSICS
+#### PHYSICS ####
 G = 6.6743 * 1e-11
 M_EARTH = 5.97219 * 1e24
 M_SUN = 1.989 * 1e30
 M_MOON = 7.34767309 * 1e22
 
-# SIMULATION
+# Data obtained from WGS-84
+EARTH_SEMI_MAJOR = 6378137.0
+EARTH_SEMI_MINOR = 6356752.3142
+
+#### SIMULATION ####
+SCALE = 1e-5 # Scale physics to pixels
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 MAX_FPS = 60
@@ -23,15 +28,10 @@ CENTER = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
 ######## ENUMERABLE VALUES ########
 class MissionStatus(Enum):
-    LAUNCHING = -1
-    IN_ORBIT_AND_MONITORING = 0
-    IN_ORBIT_AND_NOT_MONITORING = 1
-    IN_ORBIT_AND_OUT_OF_RANGE = 2
-    OUT_OF_ORBIT_AND_MONITORING = 3
-    OUT_OF_ORBIT_AND_NOT_MONITORING = 4
-    OUT_OF_ORBIT_AND_OUT_OF_RANGE = 5
+    IN_ORBIT = 0
+    OUT_OF_ORBIT = 1
 
-class MissionAnomalies(Enum):
+class MissionPerturbations(Enum):
     J2_EFFECT = 0
     DRAG = 1
     SOLAR_RADIATION_PRESSURE = 2
@@ -43,43 +43,22 @@ gMissions = [] # all satellite missions
     
 ######## CONTROL LOGIC ########
 class MissionManager:
-    def __init__(self, status, mass, target, J2=False, DRAG=False, SOLAR=False, MAG=False):
-        self.status = status
-        self.satellite = Satellite(mass, target)
+    def __init__(self, satellite, J2=False, DRAG=False, SOLAR=False, MAG=False):
+        self.satellite = satellite
+        gMissions.append(self)
 
-        self.keplerOrbit = 200.0  # pixels (display units)
+        self.anomalies = [False] * len(MissionPerturbations)
+        if J2:    self.anomalies[MissionPerturbations.J2_EFFECT.value] = True
+        if DRAG:  self.anomalies[MissionPerturbations.DRAG.value] = True
+        if SOLAR: self.anomalies[MissionPerturbations.SOLAR_RADIATION_PRESSURE.value] = True
+        if MAG:   self.anomalies[MissionPerturbations.MAGNETIC_EFFECTS.value] = True
 
-        self.anomalies = [False] * len(MissionAnomalies)
-        if J2:    self.anomalies[MissionAnomalies.J2_EFFECT.value] = True
-        if DRAG:  self.anomalies[MissionAnomalies.DRAG.value] = True
-        if SOLAR: self.anomalies[MissionAnomalies.SOLAR_RADIATION_PRESSURE.value] = True
-        if MAG:   self.anomalies[MissionAnomalies.MAGNETIC_EFFECTS.value] = True
+    def __del__(self):
+        gMissions.remove(self)
 
-    def getStatus(self):
-        return self.status
-
-    def updateStatus(self):
-        if self.status == MissionStatus.IN_ORBIT_AND_MONITORING:
-            if not self.satellite.checkRange():
-                self.satellite.toggleMonitoring()
-                self.status = MissionStatus.IN_ORBIT_AND_NOT_MONITORING
-
-        elif self.status == MissionStatus.IN_ORBIT_AND_NOT_MONITORING:
-            if self.satellite.checkRange():
-                self.satellite.toggleMonitoring()
-                self.status = MissionStatus.IN_ORBIT_AND_MONITORING
-
-        elif self.status == MissionStatus.OUT_OF_ORBIT_AND_MONITORING:
-            if not self.satellite.checkRange():
-                self.satellite.toggleMonitoring()
-                self.status = MissionStatus.OUT_OF_ORBIT_AND_NOT_MONITORING
-            self.satellite.fixOrbit(self.keplerOrbit)
-
-        elif self.status == MissionStatus.OUT_OF_ORBIT_AND_NOT_MONITORING:
-            if self.satellite.checkRange():
-                self.satellite.toggleMonitoring()
-                self.status = MissionStatus.OUT_OF_ORBIT_AND_MONITORING
-            self.satellite.fixOrbit(self.keplerOrbit)
+    ## RUNS EVERY FRAME
+    def missionUpdate(self, dt):
+        pass
 
 ######## RIGID BODY IMPLEMENTATION ########
 class Entity:
@@ -96,9 +75,11 @@ class Entity:
         gEntities.remove(self)
 
     # DYNAMICS
-
+    @staticmethod
     def simGravitation():
-        """MUST BE RUN EVERY FRAME TO ACCOUNT FOR POSITIONAL CHANGES"""
+        """
+        MUST BE RUN EVERY FRAME TO ACCOUNT FOR POSITIONAL CHANGES
+        """
         for i in range(len(gEntities)):
             target = gEntities[i]
             fTarget = (0, 0, 0)
@@ -110,30 +91,36 @@ class Entity:
                     continue
                 
                 rVec = Vector.vectorSub(body.pos, target.pos)
+                rMag = Vector.vectorMag(rVec)
 
                 # a body won't apply gravitational force on itself
                 # F = Gm1m2 / r^2
-                F = G * target.mass * body.mass / Vector.vectorDot(rVec, rVec)
+                F = 0 if rMag == 0 else G * target.mass * body.mass / (rMag ** 2)
 
                 # unit vector originating from target and going towards the body
-                unitVec = Vector.vectorUnit(rVec)
-                resolvedVec = Vector.vectorResolve(Vector.vectorScalar(unitVec, F))
-                fTarget = Vector.vectorAdd(fTarget, resolvedVec)
+                vec = Vector.vectorScalar(Vector.vectorUnit(rVec), F)
+                fTarget = Vector.vectorAdd(fTarget, vec)
 
             target.force = fTarget
             gEntities[i] = target
 
     def addForces(self, f):
         """ALWAYS TO BE RUN AFTER SIMGRAVITATION() SINCE THE FUNCTION RESETS FORCES TO ZERO"""
-        self.forces = Vector.vectorAdd(self.forces, f)
+        self.force = Vector.vectorAdd(self.force, f)
 
     def updateDynamics(self, dt):
+        if self.mass == 0:
+            return
+
         f = self.force
         self.acc = Vector.vectorScalar(f, 1 / self.mass)
 
         self.pos = Vector.vectorAdd( # s = ut + 1/2*at^2
-            Vector.vectorScalar(self.vel, dt),
-            Vector.vectorScalar(self.acc, 0.5 * (dt ** 2))
+            self.pos,
+            Vector.vectorAdd(
+                Vector.vectorScalar(self.vel, dt),
+                Vector.vectorScalar(self.acc, 0.5 * (dt ** 2))
+            )
         )
 
         self.vel = Vector.vectorAdd(self.vel, Vector.vectorScalar(self.acc, dt)) # v = u + at
@@ -144,8 +131,50 @@ class Entity:
         if hasattr(self, "orbit"):
             self.orbit.append((x, y, z, self.orbitColor))
 
+    def draw(self, screen):
+        pygame.draw.circle(screen, "green", self.toScreen(), 3)
+
+    def toScreen(self):
+        x, y, z = self.pos
+        sx = int(CENTER[0] + x * SCALE)
+        sy = int(CENTER[1] - y * SCALE)
+        return (sx, sy)
+
+# Cosmic bodies such as Earth, the Moon, asteroids, etc.
+class cosmicBody(Entity):
+    def __init__(self, mass, center, axesParams, vel = (0.0, 0.0, 0.0), acc = (0.0, 0.0, 0.0), force = (0.0, 0.0, 0.0)):
+        Entity.__init__(self, mass, center, vel, acc, force)
+        self.center = center # x, y, z
+        self.axesParams = axesParams # a, b, c
+
+    def getLaunchLocation(self):
+        """
+        TBD
+        """
+        pass
+
+    # return satellite parameters to be displayed on the screen
+    def getString(self):
+        return (
+            "Position: " + self.satellite.pos + 
+            "\nVelocity: " + self.satellite.vel +
+            "\nAcceleration: " + self.satellite.acc +
+            "\nMonitoring: " + ("Yes" if self.satellite.monitoring else "No") +
+            "\nStatus: " + self.status
+        )
+
+    def draw(self, screen):
+        x, y, z = self.center
+        a, b, c = self.axesParams
+        sx = int(CENTER[0] + x * SCALE)
+        sy = int(CENTER[1] - y * SCALE)
+
+        print(a, b)
+        referenceRect = pygame.Rect(sx, sy, int(a * SCALE / 2), int(b * SCALE / 2))
+        pygame.draw.ellipse(screen, "blue", referenceRect)
+
 class Satellite(Entity):
-    def __init__(self, mass, target, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0), force=(0.0, 0.0, 0.0)):
+    def __init__(self, mass, target, primaryBody, targetAlt, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0), force=(0.0, 0.0, 0.0)):
         Entity.__init__(self, mass, pos, vel, acc, force)
         self.monitoring = False
         self.target = target # target is an entity
@@ -156,8 +185,23 @@ class Satellite(Entity):
                 random.randint(50, 255)
         )
 
+        # The body around which the satellite is revolving
+        self.primary = primaryBody
+
+        # The altitude at which the satellite will revolve with an error correction of +-5%
+        self.targetAlt = targetAlt
+
+        # demonstration
+        if self.pos == (0.0, 0.0, 0.0):
+            r = self.primary.axesParams[0] + targetAlt
+            self.pos = (r, 0.0, 0.0) # a + altitude
+
+            # demo: Initial tangential velocity for circular orbit
+            v_mag = math.sqrt(G * self.primary.mass / r)
+            self.vel = (0, v_mag, 0)
+
     # Check if the target is within the visible range of the satellite
-    def checkRange(self, gravitationBody):
+    def checkRange(self):
         """
         parametric form of line => L(t) = P + tU
         P = current position of satellite
@@ -181,45 +225,51 @@ class Satellite(Entity):
         """
         Px, Py, Pz = self.pos
         Ux, Uy, Uz = Vector.vectorSub(self.target.pos, self.pos)
-        cx, cy, cz = gravitationBody.centre
+        cx, cy, cz = self.primary.center
         dx, dy, dz = Px - cx, Py - cy, Pz - cz
-        a, b, c = gravitationBody.axesParams
+        a, b, c = self.primary.axesParams
 
         A = Ux ** 2 / a ** 2 + Uy ** 2 / b ** 2 + Uz ** 2 / c ** 2
         B = 2 * ((dx * Ux)/a**2 + (dy * Uy)/b**2 + (dz * Uz)/c**2)
         C = dx ** 2 / a ** 2 + dy ** 2 / b ** 2 + dz ** 2 / c ** 2 - 1
 
-        toCheck = B ** 2 - 4 * A * C
+        toCheck = B ** 2 - 4 * A * C # discriminant D = b^2 - 4ac
+        self.monitoring = toCheck < 0
         return toCheck < 0
 
-    # Toggle satellite monitoring of the target
-    def toggleMonitoring(self):
-        self.monitoring = not self.monitoring
-        print("toggleMonitoring ->", self.monitoring)
+    # Fix satellite's orbit by firing thrusters
+    def fixOrbit(self):
+        a, b, c = self.primary.axesParams
+        current = self.getAltitude() # a, b >> altitude so this works fine
+        acceptable_error = 0.05
 
-    # TBD : Fix satellite's orbit by firing thrusters
-    def fixOrbit(self, desired_radius):
-        x, y, z = self.pos
-        r = math.sqrt(x*x + y*y + z*z)
-        if r == 0: return
+        # TBD: Orbital correction logic
+        if current < 0.95 * self.targetAlt:
+            pass
 
-        ux, uy, uz = x/r, y/r, z/r
-        correction = (desired_radius - r) * 0.05
-        self.pos = (x + ux*correction, y + uy*correction, z + uz*correction)
-        self.vel = (0.0, 0.0, 0.0)
+        if current > 1.05 * self.targetAlt:
+            pass 
+
+    # get the current altitude of the satellite
+    def getAltitude(self):
+        # (a + b) / 2 roughly gives the radii since a, b >> altitude
+        return Vector.vectorMag(Vector.vectorSub(
+            self.pos,
+            self.primary.center
+        )) - (self.primary.axesParams[0] + self.primary.axesParams[1])/2 
 
     # Draw satellite and orbit on the screen
     def draw(self, screen):
         # draw orbit
         for ox, oy, oz, color in self.orbit:
-            sx = int(CENTER[0] + ox)
-            sy = int(CENTER[1] - oy)
+            sx = int(CENTER[0] + ox * SCALE)
+            sy = int(CENTER[1] - oy * SCALE)
             pygame.draw.circle(screen, color, (sx, sy), 2)
 
         # draw satellite
         x, y, z = self.pos
-        sx = int(CENTER[0] + x)
-        sy = int(CENTER[1] - y)
+        sx = int(CENTER[0] + x * SCALE)
+        sy = int(CENTER[1] - y * SCALE)
         pygame.draw.circle(
             screen,
             (255,255,180) if self.monitoring else (200,80,80),
@@ -228,18 +278,20 @@ class Satellite(Entity):
         )
 
         # draw monitoring line
-        if (self.monitoring):
-            x, y, z = self.pos
-            h, k, l = self.target.pos
-            pygame.draw.line("red", (x, y), (h, k), 3)
+        if self.checkRange:
+            sat_screen = self.toScreen()  # satellite screen coordinates
+            tx, ty, tz = self.target.pos
+            target_screen = (int(CENTER[0] + tx * SCALE), int(CENTER[1] - ty * SCALE))
+            pygame.draw.line(screen, "red", sat_screen, target_screen, 1)
+
 
         # status text
-        r = math.sqrt(x*x + y*y + z*z)
-        txt = font.render(
-            f"Status: {manager.status.name}   r={r:.1f}",
-            True, (220,220,220)
-        )
-        screen.blit(txt, (10, 10))
+        # r = math.sqrt(x*x + y*y + z*z)
+        # txt = font.render(
+        #     f"Status: {manager.status.name}   r={r:.1f}",
+        #     True, (220,220,220)
+        # )
+        # screen.blit(txt, (10, 10))
 
 
 #################### SIMULATION LOGIC ####################
@@ -248,35 +300,69 @@ pygame.init()
 
 clock = pygame.time.Clock()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Satellite Demo (with Orbit Trail)")
+pygame.display.set_caption("CubeSats Simulation")
 
-# Create satellites and assign their corresponding managers
-sat = Satellite(mass=1.0)
-manager = MissionManager(
-    status=MissionStatus.LAUNCHING,
-    satellite=sat
+"""
+planetOne here simulates the Earth, which is an oblate spheroid
+An oblate spheroid can be represented in 2D as an ellipse
+
+As per WGS-84, the standard parameters for the Earth's ellipsoid shape is (in meters):
+a = 6378137.0
+b = 6378137.0
+c = 6356752.3142
+
+Which means c is 0.3364% smaller than a (or b)
+"""
+planetOne = cosmicBody(
+    mass = M_EARTH, 
+    center = (0, 0, 0), 
+    axesParams = (EARTH_SEMI_MAJOR, EARTH_SEMI_MINOR, (EARTH_SEMI_MAJOR + EARTH_SEMI_MINOR)/2)
+)
+
+targetStation = Entity(
+    mass = 0, 
+    pos = (EARTH_SEMI_MAJOR, 0, 0)
+)
+
+# pos = planetOne.getLaunchLocation()
+CubeSat_One = Satellite(
+    mass = 1, 
+    target = targetStation,
+    primaryBody = planetOne,
+    targetAlt = 400_000 # 400 kilometres
+)
+
+CubeSat_One_MissionManager = MissionManager(
+    satellite = CubeSat_One
 )
 
 # game loop and text 
 running = True
-t = 0.0
 font = pygame.font.SysFont(None, 20)
+t = 0
 
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
-    dt = clock.tick(MAX_FPS) / 1000.0
+    dt = clock.tick(MAX_FPS)
     t += dt
 
-    sat.updateDynamics(radius=r, phi=phi, theta=theta, v=(0,0,0), f=(0,0,0))
-    manager.updateStatus()
-
+    # Fill the screen with a dark background
     screen.fill((0, 0, 10))
-    pygame.draw.circle(screen, (20, 60, 20), CENTER, 50)  # Earth
 
-    sat.draw(screen)
+    # simulates gravitational forces for each entity
+    Entity.simGravitation()
+
+    # updating attributes for satellites based on mission status
+    CubeSat_One_MissionManager.missionUpdate(dt)
+
+    # updating dynamics for all entities
+    for i in range(len(gEntities)):
+        gEntities[i].updateDynamics(dt)
+        gEntities[i].draw(screen)
+
     pygame.display.flip()
 
 pygame.quit()

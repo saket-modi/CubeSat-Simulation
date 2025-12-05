@@ -1,2 +1,4 @@
 *.pdf
 threebodyproblem.py
+__pycache__
+debugging.py
