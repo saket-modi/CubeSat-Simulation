@@ -1,5 +1,10 @@
 import math
 
+class Misc:
+    @staticmethod
+    def toStr(v):
+        return str(v[0]) + str(v[1]) + str(v[2])
+
 ######## VECTOR MATH ########
 # Performs vector operations on tuples
 class Vector:

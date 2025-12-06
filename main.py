@@ -2,7 +2,7 @@ import pygame
 import sys
 import math
 import random
-from tupleVectorMath import Vector
+from tuple_operations import *
 from enum import Enum
 
 #################### MISSION LOGIC ####################
@@ -153,24 +153,14 @@ class cosmicBody(Entity):
         """
         pass
 
-    # return satellite parameters to be displayed on the screen
-    def getString(self):
-        return (
-            "Position: " + self.satellite.pos + 
-            "\nVelocity: " + self.satellite.vel +
-            "\nAcceleration: " + self.satellite.acc +
-            "\nMonitoring: " + ("Yes" if self.satellite.monitoring else "No") +
-            "\nStatus: " + self.status
-        )
-
     def draw(self, screen):
         x, y, z = self.center
         a, b, c = self.axesParams
         sx = int(CENTER[0] + x * SCALE)
         sy = int(CENTER[1] - y * SCALE)
+        a, b = int(a * SCALE), int(b * SCALE)
 
-        print(a, b)
-        referenceRect = pygame.Rect(sx, sy, int(a * SCALE / 2), int(b * SCALE / 2))
+        referenceRect = pygame.Rect(sx - a/2, sy - b/2, a, b)
         pygame.draw.ellipse(screen, "blue", referenceRect)
 
 class Satellite(Entity):
@@ -193,8 +183,8 @@ class Satellite(Entity):
 
         # demonstration
         if self.pos == (0.0, 0.0, 0.0):
-            r = self.primary.axesParams[0] + targetAlt
-            self.pos = (r, 0.0, 0.0) # a + altitude
+            r = self.primary.axesParams[0]/2 + targetAlt
+            self.pos = (r, 0.0, 0.0) # a/2 + altitude
 
             # demo: Initial tangential velocity for circular orbit
             v_mag = math.sqrt(G * self.primary.mass / r)
@@ -256,7 +246,17 @@ class Satellite(Entity):
         return Vector.vectorMag(Vector.vectorSub(
             self.pos,
             self.primary.center
-        )) - (self.primary.axesParams[0] + self.primary.axesParams[1])/2 
+        )) - (self.primary.axesParams[0] + self.primary.axesParams[1])/2
+    
+    # return satellite parameters to be displayed on the screen
+    def getString(self):
+        # "Position: " + Misc.toStr(self.pos) + 
+        # "Velocity: " + Misc.toStr(self.vel) +
+        # "Acceleration: " + Misc.toStr(self.acc) +
+        # "Monitoring: " + ("Yes" if self.monitoring else "No") +
+        return (
+            "Altitude: " + str(round(self.getAltitude()/1000, ndigits = 2)) + " km"
+        )
 
     # Draw satellite and orbit on the screen
     def draw(self, screen):
@@ -284,15 +284,12 @@ class Satellite(Entity):
             target_screen = (int(CENTER[0] + tx * SCALE), int(CENTER[1] - ty * SCALE))
             pygame.draw.line(screen, "red", sat_screen, target_screen, 1)
 
-
         # status text
-        # r = math.sqrt(x*x + y*y + z*z)
-        # txt = font.render(
-        #     f"Status: {manager.status.name}   r={r:.1f}",
-        #     True, (220,220,220)
-        # )
-        # screen.blit(txt, (10, 10))
-
+        txt = font.render(
+            self.getString(),
+            True, (220,220,220)
+        )
+        screen.blit(txt, (10, 10))
 
 #################### SIMULATION LOGIC ####################
 
@@ -329,7 +326,7 @@ CubeSat_One = Satellite(
     mass = 1, 
     target = targetStation,
     primaryBody = planetOne,
-    targetAlt = 400_000 # 400 kilometres
+    targetAlt = 4_000_000 # 4000 kilometres
 )
 
 CubeSat_One_MissionManager = MissionManager(
