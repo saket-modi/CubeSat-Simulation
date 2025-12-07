@@ -2,6 +2,8 @@ import pygame
 import sys
 import math
 import random
+import orbit_plot as o_plt
+import threading
 from tuple_operations import *
 from enum import Enum
 
@@ -18,6 +20,8 @@ M_MOON = 7.34767309 * 1e22
 # Data obtained from WGS-84
 EARTH_SEMI_MAJOR = 6378137.0
 EARTH_SEMI_MINOR = 6356752.3142
+MOON_SEMI_MAJOR = 1737e3
+MOON_SEMI_MINOR = 1737e3
 
 #### SIMULATION ####
 SCALE = 1e-5 # Scale physics to pixels
@@ -40,7 +44,7 @@ class MissionPerturbations(Enum):
 ######## GLOBAL STORAGE ########
 gEntities = [] # stores all entities
 gMissions = [] # all satellite missions
-    
+
 ######## CONTROL LOGIC ########
 class MissionManager:
     def __init__(self, satellite, J2=False, DRAG=False, SOLAR=False, MAG=False):
@@ -90,40 +94,40 @@ class Entity:
                 if i == j:
                     continue
                 
-                rVec = Vector.vectorSub(body.pos, target.pos)
-                rMag = Vector.vectorMag(rVec)
+                rVec = vectorSub(body.pos, target.pos)
+                rMag = vectorMag(rVec)
 
                 # a body won't apply gravitational force on itself
                 # F = Gm1m2 / r^2
                 F = 0 if rMag == 0 else G * target.mass * body.mass / (rMag ** 2)
 
                 # unit vector originating from target and going towards the body
-                vec = Vector.vectorScalar(Vector.vectorUnit(rVec), F)
-                fTarget = Vector.vectorAdd(fTarget, vec)
+                vec = vectorScalar(vectorUnit(rVec), F)
+                fTarget = vectorAdd(fTarget, vec)
 
             target.force = fTarget
             gEntities[i] = target
 
     def addForces(self, f):
         """ALWAYS TO BE RUN AFTER SIMGRAVITATION() SINCE THE FUNCTION RESETS FORCES TO ZERO"""
-        self.force = Vector.vectorAdd(self.force, f)
+        self.force = vectorAdd(self.force, f)
 
     def updateDynamics(self, dt):
         if self.mass == 0:
             return
 
         f = self.force
-        self.acc = Vector.vectorScalar(f, 1 / self.mass)
+        self.acc = vectorScalar(f, 1 / self.mass)
 
-        self.pos = Vector.vectorAdd( # s = ut + 1/2*at^2
+        self.pos = vectorAdd( # s = ut + 1/2*at^2
             self.pos,
-            Vector.vectorAdd(
-                Vector.vectorScalar(self.vel, dt),
-                Vector.vectorScalar(self.acc, 0.5 * (dt ** 2))
+            vectorAdd(
+                vectorScalar(self.vel, dt),
+                vectorScalar(self.acc, 0.5 * (dt ** 2))
             )
         )
 
-        self.vel = Vector.vectorAdd(self.vel, Vector.vectorScalar(self.acc, dt)) # v = u + at
+        self.vel = vectorAdd(self.vel, vectorScalar(self.acc, dt)) # v = u + at
         
         x, y, z = self.pos
 
@@ -132,7 +136,8 @@ class Entity:
             self.orbit.append((x, y, z, self.orbitColor))
 
     def draw(self, screen):
-        pygame.draw.circle(screen, "green", self.toScreen(), 3)
+        # pygame.draw.circle(screen, "green", transform(), 3)
+        pass
 
     def toScreen(self):
         x, y, z = self.pos
@@ -142,9 +147,9 @@ class Entity:
 
 # Cosmic bodies such as Earth, the Moon, asteroids, etc.
 class cosmicBody(Entity):
-    def __init__(self, mass, center, axesParams, vel = (0.0, 0.0, 0.0), acc = (0.0, 0.0, 0.0), force = (0.0, 0.0, 0.0)):
-        Entity.__init__(self, mass, center, vel, acc, force)
-        self.center = center # x, y, z
+    def __init__(self, mass, pos, axesParams, vel = (0.0, 0.0, 0.0), acc = (0.0, 0.0, 0.0), force = (0.0, 0.0, 0.0)):
+        Entity.__init__(self, mass, pos, vel, acc, force)
+        self.pos = pos # x, y, z
         self.axesParams = axesParams # a, b, c
 
     def getLaunchLocation(self):
@@ -154,14 +159,17 @@ class cosmicBody(Entity):
         pass
 
     def draw(self, screen):
-        x, y, z = self.center
+        x, y, z = self.pos
         a, b, c = self.axesParams
-        sx = int(CENTER[0] + x * SCALE)
-        sy = int(CENTER[1] - y * SCALE)
-        a, b = int(a * SCALE), int(b * SCALE)
 
-        referenceRect = pygame.Rect(sx - a/2, sy - b/2, a, b)
-        pygame.draw.ellipse(screen, "blue", referenceRect)
+        width_px = int(2 * a * SCALE)
+        height_px = int(2 * b * SCALE)
+
+        screen_center = transform(vectorScalar((x, y, z), SCALE), CENTER)
+        top_left = (int(screen_center[0] - width_px/2), int(screen_center[1] - height_px/2))
+
+        referenceRect = pygame.Rect(top_left[0], top_left[1], max(1,width_px), max(1,height_px))
+        pygame.draw.ellipse(screen, "yellow", referenceRect, width = 1)
 
 class Satellite(Entity):
     def __init__(self, mass, target, primaryBody, targetAlt, pos=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), acc=(0.0, 0.0, 0.0), force=(0.0, 0.0, 0.0)):
@@ -187,8 +195,19 @@ class Satellite(Entity):
             self.pos = (r, 0.0, 0.0) # a/2 + altitude
 
             # demo: Initial tangential velocity for circular orbit
-            v_mag = math.sqrt(G * self.primary.mass / r)
+            v_mag = math.sqrt(1.5 * G * self.primary.mass / r)
             self.vel = (0, v_mag, 0)
+
+        def rotateX(v, angle):
+            x, y, z = v
+            c = math.cos(angle)
+            s = math.sin(angle)
+            return (x, y*c - z*s, y*s + z*c)
+
+        # tilt orbit by 30 degrees
+        tilt = math.radians(30)
+        self.pos = rotateX(self.pos, tilt)
+        self.vel = rotateX(self.vel, tilt)
 
     # Check if the target is within the visible range of the satellite
     def checkRange(self):
@@ -214,8 +233,8 @@ class Satellite(Entity):
         dz = Pz - cz
         """
         Px, Py, Pz = self.pos
-        Ux, Uy, Uz = Vector.vectorSub(self.target.pos, self.pos)
-        cx, cy, cz = self.primary.center
+        Ux, Uy, Uz = vectorSub(self.target.pos, self.pos)
+        cx, cy, cz = self.primary.pos
         dx, dy, dz = Px - cx, Py - cy, Pz - cz
         a, b, c = self.primary.axesParams
 
@@ -243,9 +262,9 @@ class Satellite(Entity):
     # get the current altitude of the satellite
     def getAltitude(self):
         # (a + b) / 2 roughly gives the radii since a, b >> altitude
-        return Vector.vectorMag(Vector.vectorSub(
+        return vectorMag(vectorSub(
             self.pos,
-            self.primary.center
+            self.primary.pos
         )) - (self.primary.axesParams[0] + self.primary.axesParams[1])/2
     
     # return satellite parameters to be displayed on the screen
@@ -262,27 +281,25 @@ class Satellite(Entity):
     def draw(self, screen):
         # draw orbit
         for ox, oy, oz, color in self.orbit:
-            sx = int(CENTER[0] + ox * SCALE)
-            sy = int(CENTER[1] - oy * SCALE)
-            pygame.draw.circle(screen, color, (sx, sy), 2)
+            coords = transform(vectorScalar((ox, oy, oz), SCALE), CENTER)
+            pygame.draw.circle(screen, color, coords, 1)
 
         # draw satellite
         x, y, z = self.pos
-        sx = int(CENTER[0] + x * SCALE)
-        sy = int(CENTER[1] - y * SCALE)
+        coords = transform(vectorScalar((x, y, z), SCALE), CENTER)
         pygame.draw.circle(
             screen,
             (255,255,180) if self.monitoring else (200,80,80),
-            (sx, sy),
-            6
+            coords,
+            3
         )
 
         # draw monitoring line
-        if self.checkRange:
+        if self.checkRange():
             sat_screen = self.toScreen()  # satellite screen coordinates
             tx, ty, tz = self.target.pos
-            target_screen = (int(CENTER[0] + tx * SCALE), int(CENTER[1] - ty * SCALE))
-            pygame.draw.line(screen, "red", sat_screen, target_screen, 1)
+            coords = transform(vectorScalar((tx, ty, tz), SCALE), CENTER)
+            pygame.draw.line(screen, "red", sat_screen, coords, 1)
 
         # status text
         txt = font.render(
@@ -312,9 +329,16 @@ Which means c is 0.3364% smaller than a (or b)
 """
 planetOne = cosmicBody(
     mass = M_EARTH, 
-    center = (0, 0, 0), 
+    pos = (0, 0, 0), 
     axesParams = (EARTH_SEMI_MAJOR, EARTH_SEMI_MINOR, (EARTH_SEMI_MAJOR + EARTH_SEMI_MINOR)/2)
 )
+
+# planetTwo = cosmicBody(
+#     mass = M_EARTH * 100,
+#     pos = (384400e3, 384400e3, 384400e3),
+#     axesParams = (MOON_SEMI_MAJOR, MOON_SEMI_MINOR, (MOON_SEMI_MAJOR + MOON_SEMI_MINOR)/2),
+#     vel = (-1024/0.707, -1024/0.707, 0)
+# )
 
 targetStation = Entity(
     mass = 0, 
@@ -338,16 +362,35 @@ running = True
 font = pygame.font.SysFont(None, 20)
 t = 0
 
+######## TESTING PLOTS ########
+threading.Thread(
+    target=o_plt.plot,
+    args=(CubeSat_One, ),
+    daemon=True
+).start()
+
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
-    dt = clock.tick(MAX_FPS)
+    dt = clock.tick(MAX_FPS) / 10
     t += dt
 
     # Fill the screen with a dark background
     screen.fill((0, 0, 10))
+
+    # Draw the POSITIVE x, y, and z axes. z-axis will be displayed at an angle pi/4 from both x and y
+    # Note that pygame's coordinate system instantiates the origin at the TOP LEFT CORNER
+    # Basically, add the coordinate to the x-axis, add -1 * coordinate for y-axis
+    # So (x, y) in this reference is (0, 0) [CENTER] + (x, -y)
+
+    # x-axis
+    pygame.draw.line(screen, "red", CENTER, getCoords((SCREEN_WIDTH // 2, 0), CENTER))
+    # y-axis
+    pygame.draw.line(screen, "green", CENTER, getCoords((0, SCREEN_HEIGHT // 2), CENTER))
+    # z-axis
+    pygame.draw.line(screen, "blue", CENTER, getCoords((-SCREEN_WIDTH // 2, -SCREEN_HEIGHT // 2), CENTER))
 
     # simulates gravitational forces for each entity
     Entity.simGravitation()
@@ -359,7 +402,7 @@ while running:
     for i in range(len(gEntities)):
         gEntities[i].updateDynamics(dt)
         gEntities[i].draw(screen)
-
+    
     pygame.display.flip()
 
 pygame.quit()
