@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 # from main import MAX_FPS
 
-dt = 1000
+index = 0
+dt = 1000 # Updates the plot every second
 
 X = [[], [], []]
 V = [[], [], []]
@@ -23,10 +24,13 @@ def animate(sat):
     trim(A[0]); trim(A[1]); trim(A[2])
     trim(T)
 
+    global index
+    index += 1
+
     X[0].append(pos[0]); X[1].append(pos[1]); X[2].append(pos[2])
     V[0].append(vel[0]); V[1].append(vel[1]); V[2].append(vel[2])
     A[0].append(acc[0]); A[1].append(acc[1]); A[2].append(acc[2])
-    T.append(len(T))
+    T.append(index)
 
     plt.cla()
     plt.plot(T, X[0], color = "red", label = "x")
@@ -43,4 +47,5 @@ def plot(sat):
 
     plt.style.use('dark_background')
     plt.tight_layout()
+    plt.legend(loc='upper right')
     plt.show()

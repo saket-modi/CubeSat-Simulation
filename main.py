@@ -374,7 +374,9 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    dt = clock.tick(MAX_FPS) / 10
+    # This should actually be divided by 1000 to be converted to seconds
+    # however a large value of dt is presumed to speed up simulation as a simple "hacky" fix
+    dt = clock.tick(MAX_FPS) / 10 
     t += dt
 
     # Fill the screen with a dark background
