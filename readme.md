@@ -6,3 +6,4 @@ To-do list:
     2) Position, velocity, and acceleration for the satellite (2D)
 - Performance:
     1) Barnes-Hut algorithm for gravity simulation (nlogn instead of n^2 time complexity)
+- Station-keeping logic

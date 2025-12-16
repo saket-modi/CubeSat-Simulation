@@ -2,8 +2,8 @@ import pygame
 import sys
 import math
 import random
-import orbit_plot as o_plt
 import threading
+import plots as plts
 from tuple_operations import *
 from enum import Enum
 
@@ -16,6 +16,7 @@ G = 6.6743 * 1e-11
 M_EARTH = 5.97219 * 1e24
 M_SUN = 1.989 * 1e30
 M_MOON = 7.34767309 * 1e22
+INTEGRATOR = 'EULER'
 
 # Data obtained from WGS-84
 EARTH_SEMI_MAJOR = 6378137.0
@@ -112,6 +113,7 @@ class Entity:
         """ALWAYS TO BE RUN AFTER SIMGRAVITATION() SINCE THE FUNCTION RESETS FORCES TO ZERO"""
         self.force = vectorAdd(self.force, f)
 
+    # Euler implementation
     def updateDynamics(self, dt):
         if self.mass == 0:
             return
@@ -119,21 +121,22 @@ class Entity:
         f = self.force
         self.acc = vectorScalar(f, 1 / self.mass)
 
-        self.pos = vectorAdd( # s = ut + 1/2*at^2
-            self.pos,
-            vectorAdd(
-                vectorScalar(self.vel, dt),
-                vectorScalar(self.acc, 0.5 * (dt ** 2))
+        if INTEGRATOR == 'EULER':
+            self.pos = vectorAdd( # s = ut + 1/2*at^2
+                self.pos,
+                vectorAdd(
+                    vectorScalar(self.vel, dt),
+                    vectorScalar(self.acc, 0.5 * (dt ** 2))
+                )
             )
-        )
 
-        self.vel = vectorAdd(self.vel, vectorScalar(self.acc, dt)) # v = u + at
-        
-        x, y, z = self.pos
+            self.vel = vectorAdd(self.vel, vectorScalar(self.acc, dt)) # v = u + at
+            
+            x, y, z = self.pos
 
-        # If satellite has orbit list, record point
-        if hasattr(self, "orbit"):
-            self.orbit.append((x, y, z, self.orbitColor))
+            # If satellite has orbit list, record point
+            if hasattr(self, "orbit"):
+                self.orbit.append((x, y, z, self.orbitColor))
 
     def draw(self, screen):
         # pygame.draw.circle(screen, "green", transform(), 3)
@@ -357,17 +360,20 @@ CubeSat_One_MissionManager = MissionManager(
     satellite = CubeSat_One
 )
 
+# RUN PLOTS FROM plots.py
+
+# plot orbit and satellite along with cosmic entities (Earth, Moon, etc.)
+# plot the position, velocity, and acceleration of the satellite
+threading.Thread(
+    target=plts.plot,
+    args=(CubeSat_One, planetOne),
+    daemon=True
+).start()
+
 # game loop and text 
 running = True
 font = pygame.font.SysFont(None, 20)
 t = 0
-
-######## TESTING PLOTS ########
-threading.Thread(
-    target=o_plt.plot,
-    args=(CubeSat_One, ),
-    daemon=True
-).start()
 
 while running:
     for event in pygame.event.get():
@@ -376,7 +382,7 @@ while running:
 
     # This should actually be divided by 1000 to be converted to seconds
     # however a large value of dt is presumed to speed up simulation as a simple "hacky" fix
-    dt = clock.tick(MAX_FPS) / 10 
+    dt = clock.tick(MAX_FPS) 
     t += dt
 
     # Fill the screen with a dark background
